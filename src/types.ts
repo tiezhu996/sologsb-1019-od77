@@ -1,5 +1,12 @@
 export type CoderId = 'A' | 'B';
 
+export interface ThemeCitation {
+  id: string;
+  segmentId: string;
+  quote: string;
+  createdAt: string;
+}
+
 export interface Theme {
   id: string;
   name: string;
@@ -8,6 +15,7 @@ export interface Theme {
   definition: string;
   memo: string;
   examples: string[];
+  citations: ThemeCitation[];
 }
 
 export interface Segment {

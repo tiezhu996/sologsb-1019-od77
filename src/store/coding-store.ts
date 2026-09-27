@@ -3,6 +3,7 @@ import { createStore, reconcile, unwrap } from 'solid-js/store';
 import { seedState } from '../data/seed';
 import type { CoderId, CodingState, PersistedEnvelope, Segment, Theme } from '../types';
 import { readEnvelope, writeEnvelope } from '../utils/db';
+import { buildThemePath, createCitation, normalizeQuote, normalizeState, sortThemeCitations } from '../utils/citations';
 
 const STORAGE_KEY = 'sologsb-1019-state-v1';
 const TAB_ID = crypto.randomUUID();
@@ -10,7 +11,7 @@ const TAB_ID = crypto.randomUUID();
 const loadLocal = (): CodingState => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as CodingState;
+    if (raw) return normalizeState(JSON.parse(raw) as CodingState);
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
@@ -162,7 +163,7 @@ export function useCodingStore() {
   const addTheme = (name: string, parentId: string | null) => {
     const id = `t-${crypto.randomUUID()}`;
     transaction('新建主题', name, (draft) => {
-      draft.themes.push({ id, name, parentId, color: parentId ? '#57978c' : '#267365', definition: '', memo: '', examples: [] });
+      draft.themes.push({ id, name, parentId, color: parentId ? '#57978c' : '#267365', definition: '', memo: '', examples: [], citations: [] });
       draft.activeThemeId = id;
     });
     return id;
@@ -199,6 +200,18 @@ export function useCodingStore() {
           segment.assignments[coder] = [...codes];
         });
       });
+      const source = draft.themes.find((theme) => theme.id === sourceId);
+      const target = draft.themes.find((theme) => theme.id === targetId);
+      if (source && target) {
+        // 来源主题的原文引文并入目标主题，同一片段的同一句只保留一条。
+        const existing = new Set(target.citations.map((item) => `${item.segmentId} ${normalizeQuote(item.quote)}`));
+        source.citations.forEach((citation) => {
+          if (!existing.has(`${citation.segmentId} ${normalizeQuote(citation.quote)}`)) {
+            target.citations.push({ ...citation, id: `c-${crypto.randomUUID()}` });
+            existing.add(`${citation.segmentId} ${normalizeQuote(citation.quote)}`);
+          }
+        });
+      }
       draft.themes.forEach((theme) => { if (theme.parentId === sourceId) theme.parentId = targetId; });
       draft.themes = draft.themes.filter((theme) => theme.id !== sourceId);
       draft.activeThemeId = targetId;
@@ -210,7 +223,16 @@ export function useCodingStore() {
     transaction('拆分主题', newName, (draft) => {
       const source = draft.themes.find((theme) => theme.id === sourceId);
       if (!source) return;
-      draft.themes.push({ ...source, id: newId, name: newName, examples: [] });
+      // 被迁走片段上的原文引文随片段一并进入新主题。
+      const movingCitations = source.citations.filter((citation) => segmentIds.includes(citation.segmentId));
+      draft.themes.push({
+        ...source,
+        id: newId,
+        name: newName,
+        examples: [],
+        citations: movingCitations.map((citation) => ({ ...citation, id: `c-${crypto.randomUUID()}` }))
+      });
+      source.citations = source.citations.filter((citation) => !segmentIds.includes(citation.segmentId));
       draft.segments.forEach((segment) => {
         if (!segmentIds.includes(segment.id)) return;
         (['A', 'B'] as CoderId[]).forEach((coder) => {
@@ -262,27 +284,66 @@ export function useCodingStore() {
     });
   };
 
+  /** 把片段里选中的原文挂到主题下；同一主题下来自同一片段的同一句只留一条。 */
+  const addCitation = (themeId: string, segmentId: string, quote: string): boolean => {
+    const trimmed = quote.trim();
+    if (!trimmed) return false;
+    const theme = state.themes.find((item) => item.id === themeId);
+    const duplicate = theme?.citations.some((item) => item.segmentId === segmentId && normalizeQuote(item.quote) === normalizeQuote(trimmed));
+    if (duplicate) return false;
+    transaction('收录原文引文', `${theme?.name ?? themeId} · ${trimmed.slice(0, 24)}`, (draft) => {
+      const target = draft.themes.find((item) => item.id === themeId);
+      if (target) target.citations.push(createCitation(segmentId, trimmed));
+    });
+    return true;
+  };
+
+  const removeCitation = (themeId: string, citationId: string) => {
+    transaction('移除原文引文', state.themes.find((item) => item.id === themeId)?.name ?? themeId, (draft) => {
+      const theme = draft.themes.find((item) => item.id === themeId);
+      if (theme) theme.citations = theme.citations.filter((item) => item.id !== citationId);
+    });
+  };
+
+  const orderedCitationsFor = (themeId: string) => {
+    const theme = state.themes.find((item) => item.id === themeId);
+    return theme ? sortThemeCitations(theme.citations, state.segments, state.transcripts) : [];
+  };
+
   const exportCoding = (format: 'json' | 'csv') => {
     const segmentMap = new Map(state.segments.map((segment) => [segment.id, segment]));
+    const transcriptMap = new Map(state.transcripts.map((transcript) => [transcript.id, transcript]));
     const themeMap = new Map(state.themes.map((theme) => [theme.id, theme]));
-    if (format === 'json') return JSON.stringify({ exportedAt: new Date().toISOString(), ...cloneState(state) }, null, 2);
+    // 每段引文连同来源片段一起导出。
+    const citationExport = state.themes.flatMap((theme) =>
+      sortThemeCitations(theme.citations, state.segments, state.transcripts).map((citation) => ({
+        citationId: citation.id,
+        themeId: theme.id,
+        themePath: buildThemePath(theme.id, themeMap),
+        segmentId: citation.segmentId,
+        transcriptTitle: citation.segment ? transcriptMap.get(citation.segment.transcriptId)?.title ?? '' : '',
+        time: citation.segment?.time ?? '',
+        speaker: citation.segment?.speaker ?? '',
+        sourceText: citation.segment?.text ?? '',
+        quote: citation.quote,
+        createdAt: citation.createdAt
+      }))
+    );
+    if (format === 'json') return JSON.stringify({ exportedAt: new Date().toISOString(), citationExport, ...cloneState(state) }, null, 2);
     const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
     const rows = [['片段编号', '时间', '发言人', '原文', '编码者', '主题路径', '备忘录'].map(escape).join(',')];
     state.segments.forEach((segment) => {
       (['A', 'B'] as CoderId[]).forEach((coder) => {
         const name = coder === 'A' ? state.coderA : state.coderB;
         const themeIds = segment.assignments[coder];
-        const paths = themeIds.length ? themeIds.map((id) => {
-          const names: string[] = [];
-          let current = themeMap.get(id);
-          while (current) {
-            names.unshift(current.name);
-            current = current.parentId ? themeMap.get(current.parentId) : undefined;
-          }
-          return names.join(' / ');
-        }) : ['未编码'];
+        const paths = themeIds.length ? themeIds.map((id) => buildThemePath(id, themeMap)) : ['未编码'];
         rows.push([segment.id, segment.time, segment.speaker, segment.text, name, paths.join(' | '), segmentMap.get(segment.id)?.note ?? ''].map(escape).join(','));
       });
+    });
+    // 第二张表：主题引文（每条引文与其来源片段同行出现）。
+    rows.push('', ['主题路径', '访谈', '片段编号', '时间', '发言人', '来源片段原文', '引文'].map(escape).join(','));
+    citationExport.forEach((row) => {
+      rows.push([row.themePath, row.transcriptTitle, row.segmentId, row.time, row.speaker, row.sourceText, row.quote].map(escape).join(','));
     });
     return `\uFEFF${rows.join('\n')}`;
   };
@@ -308,7 +369,7 @@ export function useCodingStore() {
     if (!remote) return;
     setUndoStack((items) => [...items, cloneState(state)]);
     setRedoStack([]);
-    setState(reconcile(remote.state, { merge: false }));
+    setState(reconcile(normalizeState(remote.state), { merge: false }));
     setRemoteEnvelope(null);
   };
 
@@ -335,6 +396,9 @@ export function useCodingStore() {
     updateSegment,
     importTranscript,
     addExample,
+    addCitation,
+    removeCitation,
+    orderedCitationsFor,
     exportCoding,
     downloadExport,
     orderedThemes,

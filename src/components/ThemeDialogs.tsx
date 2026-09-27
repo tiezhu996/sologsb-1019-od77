@@ -37,7 +37,7 @@ export function MergeThemeDialog(props: { store: Store; open: boolean; onClose: 
     <div class="modal-backdrop" classList={{ hidden: !props.open }} onClick={props.onClose}>
       <section class="modal-card" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
         <header><div><span class="eyebrow">MERGE</span><h2>合并主题</h2></div><button class="modal-close" onClick={props.onClose}>×</button></header>
-        <div class="warning-box">合并后，来源主题的所有片段编码与子主题会迁移到目标主题，原主题被删除。此操作可通过撤销恢复。</div>
+        <div class="warning-box">合并后，来源主题的所有片段编码、原文引文与子主题会迁移到目标主题，原主题被删除；重复的原文引文只保留一条。此操作可通过撤销恢复。</div>
         <div class="merge-route"><strong>{source()?.name ?? '未选择'}</strong><span>→</span><select class="native-select" value={target()} onChange={(event) => setTarget(event.currentTarget.value)}><option value="">选择目标主题</option><For each={candidates()}>{(theme) => <option value={theme.id}>{theme.name}</option>}</For></select></div>
         <footer><button class="button secondary" onClick={props.onClose}>取消</button><button class="button danger" disabled={!target()} onClick={submit}>确认合并</button></footer>
       </section>
@@ -59,7 +59,7 @@ export function SplitThemeDialog(props: { store: Store; open: boolean; onClose: 
     <div class="modal-backdrop" classList={{ hidden: !props.open }} onClick={props.onClose}>
       <section class="modal-card wide" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
         <header><div><span class="eyebrow">SPLIT</span><h2>从“{source()?.name}”拆分新主题</h2></div><button class="modal-close" onClick={props.onClose}>×</button></header>
-        <p class="modal-intro">选择要迁入新主题的片段，其余片段继续保留在原主题。所有编码者的判断会一并迁移。</p>
+        <p class="modal-intro">选择要迁入新主题的片段，其余片段继续保留在原主题。所有编码者的判断，以及这些片段上已收录的原文引文会一并迁移。</p>
         <label class="field-label">新主题名称<input class="native-input full" value={name()} onInput={(event) => setName(event.currentTarget.value)} placeholder="输入更具体的主题名称" /></label>
         <div class="split-list">
           <For each={affected()} fallback={<div class="empty-state">当前主题还没有可拆分的片段。</div>}>{(segment) => (

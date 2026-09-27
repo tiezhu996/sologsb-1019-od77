@@ -179,3 +179,22 @@ kbd { justify-self: start; padding: 3px 7px; border: 1px solid #ccd4cf; border-b
 .citation-link:hover { border-color: #9dbbb3; background: #f0f6f2; }
 .citation-link span { color: #788983; font-size: 9px; }
 .citation-link p { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.quote-hint { padding: 0 18px 10px; color: var(--muted); font-size: 10px; }
+.quote-mark { background: #f4dfa6; color: inherit; border-radius: 3px; padding: 0 2px; box-decoration-break: clone; }
+.quote-popover { position: fixed; z-index: 900; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.quote-popover-button { white-space: nowrap; border: 0; border-radius: 8px; padding: 7px 12px; color: #fff; background: var(--forest-dark); box-shadow: 0 8px 22px rgba(19, 63, 59, .32); font-size: 11px; font-weight: 700; }
+.quote-popover-button:hover { background: var(--forest); }
+.quote-popover-hint { white-space: nowrap; color: #f6ead2; background: rgba(19, 40, 36, .92); border-radius: 6px; padding: 4px 9px; font-size: 10px; }
+.quote-card-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.quote-duplicate { margin-top: 6px; color: #8b3d2d; font-size: 10px; }
+.citation-heading.subtle { margin-top: 14px; color: #7b8a85; }
+.evidence-list { margin-top: 7px; display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+.evidence-item { display: flex; align-items: flex-start; gap: 4px; padding: 8px; border: 1px solid #dde5e1; border-radius: 8px; background: #f7f9f6; }
+.evidence-item:hover { border-color: #9dbbb3; background: #f0f6f2; }
+.evidence-body { flex: 1; min-width: 0; border: 0; padding: 0; text-align: left; background: transparent; color: inherit; }
+.evidence-meta { display: block; color: #788983; font-size: 9px; font-variant-numeric: tabular-nums; }
+.evidence-meta em { margin-left: 6px; color: #9a8a6e; font-style: normal; }
+.evidence-item blockquote { margin: 4px 0; font-size: 11px; line-height: 1.6; }
+.evidence-jump { display: inline-block; color: var(--forest); font-size: 9px; }
+.evidence-remove { flex: 0 0 auto; border: 0; background: transparent; color: #a68a84; font-size: 15px; line-height: 1; padding: 0 3px; }
+.evidence-remove:hover { color: var(--danger); }

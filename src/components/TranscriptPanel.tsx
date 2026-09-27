@@ -1,18 +1,114 @@
-import { For, Show, createMemo, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import type { JSX } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { Button, Checkbox, Chip, Divider, Paper, Typography } from '@suid/material';
+import { normalizeQuote } from '../utils/citations';
 import type { useCodingStore } from '../store/coding-store';
 
 type Store = ReturnType<typeof useCodingStore>;
+
+interface QuoteTarget {
+  segmentId: string;
+  quote: string;
+  x: number;
+  y: number;
+}
+
+/** 把当前主题收录过的原文句子在片段中高亮出来。 */
+function renderHighlighted(text: string, quotes: string[]): JSX.Element {
+  const ranges: Array<[number, number]> = [];
+  quotes.forEach((quote) => {
+    const needle = normalizeQuote(quote);
+    if (!needle || needle.length < 2) return;
+    const start = text.indexOf(needle);
+    if (start >= 0) ranges.push([start, start + needle.length]);
+  });
+  if (!ranges.length) return text;
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  ranges.forEach(([start, end]) => {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  });
+  const nodes: JSX.Element[] = [];
+  let cursor = 0;
+  merged.forEach(([start, end], index) => {
+    if (start > cursor) nodes.push(text.slice(cursor, start));
+    nodes.push(<mark class="quote-mark">{text.slice(start, end)}</mark>);
+    cursor = end;
+    if (index === merged.length - 1 && end < text.length) nodes.push(text.slice(end));
+  });
+  return nodes;
+}
 
 export default function TranscriptPanel(props: { store: Store }) {
   const [query, setQuery] = createSignal('');
   const [selected, setSelected] = createSignal<string[]>([]);
   const [batchTheme, setBatchTheme] = createSignal('');
+  const [quoteTarget, setQuoteTarget] = createSignal<QuoteTarget | null>(null);
+  const [quoteDuplicate, setQuoteDuplicate] = createSignal(false);
 
   const segments = createMemo(() => props.store.state.segments
     .filter((segment) => segment.transcriptId === props.store.state.activeTranscriptId)
     .filter((segment) => `${segment.speaker} ${segment.text}`.toLowerCase().includes(query().toLowerCase()))
     .sort((a, b) => a.order - b.order));
+
+  const activeTheme = () => props.store.state.themes.find((theme) => theme.id === props.store.state.activeThemeId);
+  const activeThemeQuotes = createMemo(() => {
+    const theme = activeTheme();
+    return theme ? theme.citations.map((citation) => citation.quote) : [];
+  });
+
+  createEffect(() => {
+    // 切换访谈或主题时收起引文浮层。
+    props.store.state.activeTranscriptId;
+    props.store.state.activeThemeId;
+    setQuoteTarget(null);
+  });
+
+  createEffect(() => {
+    if (quoteTarget()) setQuoteDuplicate(false);
+  });
+
+  const inspectSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+      setQuoteTarget(null);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const quote = selection.toString().trim();
+    const container = range.commonAncestorContainer;
+    const holder = (container.nodeType === 1 ? container as HTMLElement : container.parentElement)?.closest('[data-segment-id]') as HTMLElement | null;
+    if (!holder || !holder.closest('.segment-list') || !quote) {
+      setQuoteTarget(null);
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    setQuoteTarget({
+      segmentId: holder.dataset.segmentId!,
+      quote,
+      x: Math.min(Math.max(rect.left + rect.width / 2, 150), window.innerWidth - 150),
+      y: rect.top
+    });
+  };
+
+  onMount(() => document.addEventListener('selectionchange', inspectSelection));
+  onCleanup(() => document.removeEventListener('selectionchange', inspectSelection));
+
+  const attachQuote = () => {
+    const target = quoteTarget();
+    const themeId = props.store.state.activeThemeId;
+    if (!target || !themeId) return;
+    const created = props.store.addCitation(themeId, target.segmentId, target.quote);
+    if (created) {
+      window.getSelection()?.removeAllRanges();
+      setQuoteTarget(null);
+    } else {
+      setQuoteDuplicate(true);
+    }
+  };
 
   const toggleSelected = (id: string) => {
     setSelected((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id]);
@@ -63,6 +159,7 @@ export default function TranscriptPanel(props: { store: Store }) {
         </select>
         <Button variant="contained" size="small" disabled={!selected().length || !batchTheme()} onClick={assignBatch}>应用</Button>
       </div>
+      <div class="quote-hint">选中片段中的文字，即可挂到当前主题下作为原文引文。</div>
       <Divider />
       <div class="segment-list">
         <For each={segments()}>{(segment, index) => {
@@ -73,6 +170,7 @@ export default function TranscriptPanel(props: { store: Store }) {
             <article
               class="segment-card"
               classList={{ active: isActive() }}
+              data-segment-id={segment.id}
               onClick={() => props.store.selectSegment(segment.id)}
               tabIndex={0}
               onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') props.store.selectSegment(segment.id); }}
@@ -91,7 +189,7 @@ export default function TranscriptPanel(props: { store: Store }) {
                   <span class="conflict-dot" title="两位编码者判断不一致">分歧</span>
                 </Show>
               </div>
-              <p>{segment.text}</p>
+              <p>{renderHighlighted(segment.text, activeThemeQuotes())}</p>
               <Show when={themeNames().length}>
                 <div class="chip-line"><For each={themeNames()}>{(name) => <Chip size="small" label={name} />}</For></div>
               </Show>
@@ -100,6 +198,29 @@ export default function TranscriptPanel(props: { store: Store }) {
           );
         }}</For>
       </div>
+
+      <Portal>
+        <Show when={quoteTarget()}>
+          {(target) => (
+            <div
+              class="quote-popover"
+              style={{ left: `${target().x}px`, top: `${target().y - 10}px` }}
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              <Show when={activeTheme()} fallback={<span class="quote-popover-hint">先在中间主题树选择一个主题</span>}>
+                {(theme) => (
+                  <>
+                    <button class="quote-popover-button" onClick={attachQuote}>
+                      引用到「{theme().name.replace(/^[　]+/, '')}」
+                    </button>
+                    <Show when={quoteDuplicate()}><span class="quote-popover-hint">该句已收录在此主题下</span></Show>
+                  </>
+                )}
+              </Show>
+            </div>
+          )}
+        </Show>
+      </Portal>
     </Paper>
   );
 }
