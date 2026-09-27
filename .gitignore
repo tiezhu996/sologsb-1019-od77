@@ -1,0 +1,3 @@
+node_modules/
+dist/
+scripts/.smoke-quotes.bundle.mjs

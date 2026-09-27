@@ -29,6 +29,14 @@ export interface Transcript {
   sourceName: string;
 }
 
+export interface Quote {
+  id: string;
+  themeId: string;
+  segmentId: string;
+  text: string;
+  createdAt: string;
+}
+
 export interface CodingState {
   revision: number;
   updatedAt: string;
@@ -40,6 +48,7 @@ export interface CodingState {
   transcripts: Transcript[];
   segments: Segment[];
   themes: Theme[];
+  quotes: Quote[];
   audit: Array<{ id: string; at: string; action: string; detail: string }>;
 }
 

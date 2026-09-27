@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "esbuild scripts/smoke-quotes.ts --bundle --format=esm --platform=node --outfile=scripts/.smoke-quotes.bundle.mjs --log-level=warning && node scripts/.smoke-quotes.bundle.mjs"
   },
   "dependencies": {
     "@suid/icons-material": "^0.9.0",

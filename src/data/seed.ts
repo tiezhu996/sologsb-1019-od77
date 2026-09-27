@@ -46,6 +46,10 @@ export const seedState = (): CodingState => {
       note: ''
     })),
     themes,
+    quotes: [
+      { id: 'q-seed-1', themeId: 't-school-choice', segmentId: 's-002', text: '后来家里觉得镇上的学校更好，就把我转过去了。', createdAt: new Date().toISOString() },
+      { id: 'q-seed-2', themeId: 't-teacher', segmentId: 's-006', text: '常拿旧地图给我们讲河流和城市', createdAt: new Date().toISOString() }
+    ],
     audit: [{ id: 'a-seed', at: new Date().toISOString(), action: '初始化', detail: '载入演示访谈与两个编码者的判断' }]
   };
 };

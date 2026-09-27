@@ -1,16 +1,21 @@
 import { createEffect, createSignal } from 'solid-js';
 import { createStore, reconcile, unwrap } from 'solid-js/store';
 import { seedState } from '../data/seed';
-import type { CoderId, CodingState, PersistedEnvelope, Segment, Theme } from '../types';
+import type { CoderId, CodingState, PersistedEnvelope, Quote, Segment, Theme } from '../types';
 import { readEnvelope, writeEnvelope } from '../utils/db';
 
 const STORAGE_KEY = 'sologsb-1019-state-v1';
 const TAB_ID = crypto.randomUUID();
 
+const normalizeState = (raw: CodingState): CodingState => ({
+  ...raw,
+  quotes: Array.isArray(raw.quotes) ? raw.quotes : []
+});
+
 const loadLocal = (): CodingState => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as CodingState;
+    if (raw) return normalizeState(JSON.parse(raw) as CodingState);
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
@@ -94,7 +99,7 @@ export function useCodingStore() {
       const stored = await readEnvelope();
       const local = cloneState(state);
       if (stored && (stored.revision > local.revision || stored.updatedAt > local.updatedAt)) {
-        setRemoteEnvelope(stored);
+        setRemoteEnvelope({ ...stored, state: normalizeState(stored.state) });
       }
     } finally {
       setStorageReady(true);
@@ -185,6 +190,7 @@ export function useCodingStore() {
         segment.assignments.A = segment.assignments.A.filter((id) => id !== themeId);
         segment.assignments.B = segment.assignments.B.filter((id) => id !== themeId);
       });
+      draft.quotes = draft.quotes.filter((quote) => quote.themeId !== themeId);
       if (draft.activeThemeId === themeId) draft.activeThemeId = draft.themes[0]?.id ?? '';
     });
   };
@@ -198,6 +204,14 @@ export function useCodingStore() {
           if (segment.assignments[coder].includes(sourceId)) codes.add(targetId);
           segment.assignments[coder] = [...codes];
         });
+      });
+      const taken = new Set(draft.quotes.filter((quote) => quote.themeId === targetId).map(quoteKey));
+      draft.quotes = draft.quotes.flatMap((quote) => {
+        if (quote.themeId !== sourceId) return [quote];
+        const key = quoteKey(quote);
+        if (taken.has(key)) return [];
+        taken.add(key);
+        return [{ ...quote, themeId: targetId }];
       });
       draft.themes.forEach((theme) => { if (theme.parentId === sourceId) theme.parentId = targetId; });
       draft.themes = draft.themes.filter((theme) => theme.id !== sourceId);
@@ -218,6 +232,9 @@ export function useCodingStore() {
             segment.assignments[coder] = segment.assignments[coder].map((id) => id === sourceId ? newId : id);
           }
         });
+      });
+      draft.quotes.forEach((quote) => {
+        if (quote.themeId === sourceId && segmentIds.includes(quote.segmentId)) quote.themeId = newId;
       });
       draft.activeThemeId = newId;
     });
@@ -262,28 +279,107 @@ export function useCodingStore() {
     });
   };
 
+  const quoteKey = (quote: Pick<Quote, 'segmentId' | 'text'>) => `${quote.segmentId}${quote.text}`;
+
+  const addQuote = (themeId: string, segmentId: string, text: string): boolean => {
+    const trimmed = text.trim();
+    if (!themeId || !segmentId || !trimmed) return false;
+    const duplicated = state.quotes.some((quote) => quote.themeId === themeId && quote.segmentId === segmentId && quote.text === trimmed);
+    if (duplicated) return false;
+    transaction('添加主题引文', trimmed.length > 42 ? `${trimmed.slice(0, 42)}…` : trimmed, (draft) => {
+      draft.quotes.push({ id: `q-${crypto.randomUUID()}`, themeId, segmentId, text: trimmed, createdAt: new Date().toISOString() });
+    });
+    return true;
+  };
+
+  const removeQuote = (quoteId: string) => {
+    const quote = state.quotes.find((item) => item.id === quoteId);
+    if (!quote) return;
+    transaction('移除主题引文', quote.text.length > 42 ? `${quote.text.slice(0, 42)}…` : quote.text, (draft) => {
+      draft.quotes = draft.quotes.filter((item) => item.id !== quoteId);
+    });
+  };
+
+  const quotesForTheme = (themeId: string): Array<{ quote: Quote; segment: Segment }> => {
+    const segmentMap = new Map(state.segments.map((segment) => [segment.id, segment]));
+    return state.quotes
+      .filter((quote) => quote.themeId === themeId)
+      .flatMap((quote) => {
+        const segment = segmentMap.get(quote.segmentId);
+        return segment ? [{ quote, segment }] : [];
+      })
+      .sort((a, b) => {
+        if (a.segment.order !== b.segment.order) return a.segment.order - b.segment.order;
+        const offset = (item: { quote: Quote; segment: Segment }) => {
+          const index = item.segment.text.indexOf(item.quote.text);
+          return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+        };
+        return offset(a) - offset(b) || a.quote.createdAt.localeCompare(b.quote.createdAt);
+      });
+  };
+
   const exportCoding = (format: 'json' | 'csv') => {
     const segmentMap = new Map(state.segments.map((segment) => [segment.id, segment]));
     const themeMap = new Map(state.themes.map((theme) => [theme.id, theme]));
-    if (format === 'json') return JSON.stringify({ exportedAt: new Date().toISOString(), ...cloneState(state) }, null, 2);
+    const transcriptMap = new Map(state.transcripts.map((transcript) => [transcript.id, transcript]));
+    const themePath = (themeId: string) => {
+      const names: string[] = [];
+      let current = themeMap.get(themeId);
+      while (current) {
+        names.unshift(current.name);
+        current = current.parentId ? themeMap.get(current.parentId) : undefined;
+      }
+      return names.join(' / ');
+    };
+    const quoteEntries = (themeId: string) => quotesForTheme(themeId).map(({ quote, segment }) => ({
+      id: quote.id,
+      text: quote.text,
+      createdAt: quote.createdAt,
+      segment: {
+        id: segment.id,
+        time: segment.time,
+        speaker: segment.speaker,
+        order: segment.order,
+        text: segment.text
+      },
+      transcript: (() => {
+        const transcript = transcriptMap.get(segment.transcriptId);
+        return transcript ? { id: transcript.id, title: transcript.title } : null;
+      })()
+    }));
+    if (format === 'json') {
+      const codebook = state.themes.map((theme) => ({
+        id: theme.id,
+        name: theme.name,
+        parentId: theme.parentId,
+        path: themePath(theme.id),
+        color: theme.color,
+        definition: theme.definition,
+        memo: theme.memo,
+        examples: theme.examples,
+        quotes: quoteEntries(theme.id)
+      }));
+      return JSON.stringify({ exportedAt: new Date().toISOString(), codebook, ...cloneState(state) }, null, 2);
+    }
     const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
     const rows = [['片段编号', '时间', '发言人', '原文', '编码者', '主题路径', '备忘录'].map(escape).join(',')];
     state.segments.forEach((segment) => {
       (['A', 'B'] as CoderId[]).forEach((coder) => {
         const name = coder === 'A' ? state.coderA : state.coderB;
         const themeIds = segment.assignments[coder];
-        const paths = themeIds.length ? themeIds.map((id) => {
-          const names: string[] = [];
-          let current = themeMap.get(id);
-          while (current) {
-            names.unshift(current.name);
-            current = current.parentId ? themeMap.get(current.parentId) : undefined;
-          }
-          return names.join(' / ');
-        }) : ['未编码'];
+        const paths = themeIds.length ? themeIds.map(themePath) : ['未编码'];
         rows.push([segment.id, segment.time, segment.speaker, segment.text, name, paths.join(' | '), segmentMap.get(segment.id)?.note ?? ''].map(escape).join(','));
       });
     });
+    const quoteRows = state.themes.flatMap((theme) => quoteEntries(theme.id).map((entry) => ({ theme, entry })));
+    if (quoteRows.length) {
+      rows.push('');
+      rows.push(['主题引文（连同来源片段）'].map(escape).join(','));
+      rows.push(['主题路径', '引文', '时间', '发言人', '来源片段原文', '所在访谈'].map(escape).join(','));
+      quoteRows.forEach(({ theme, entry }) => {
+        rows.push([themePath(theme.id), entry.text, entry.segment.time, entry.segment.speaker, entry.segment.text, entry.transcript?.title ?? ''].map(escape).join(','));
+      });
+    }
     return `\uFEFF${rows.join('\n')}`;
   };
 
@@ -308,7 +404,7 @@ export function useCodingStore() {
     if (!remote) return;
     setUndoStack((items) => [...items, cloneState(state)]);
     setRedoStack([]);
-    setState(reconcile(remote.state, { merge: false }));
+    setState(reconcile(normalizeState(remote.state), { merge: false }));
     setRemoteEnvelope(null);
   };
 
@@ -335,6 +431,9 @@ export function useCodingStore() {
     updateSegment,
     importTranscript,
     addExample,
+    addQuote,
+    removeQuote,
+    quotesForTheme,
     exportCoding,
     downloadExport,
     orderedThemes,

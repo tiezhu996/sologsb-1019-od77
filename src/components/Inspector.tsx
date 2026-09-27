@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { Button, Chip, Divider, Paper, Typography } from '@suid/material';
-import type { Theme } from '../types';
+import type { Segment, Theme } from '../types';
 import type { useCodingStore } from '../store/coding-store';
 
 type Store = ReturnType<typeof useCodingStore>;
@@ -19,6 +19,16 @@ export default function Inspector(props: { store: Store }) {
     if (!current) return [];
     return props.store.state.segments.filter((item) => item.assignments.A.includes(current.id) || item.assignments.B.includes(current.id));
   });
+  const themeQuotes = createMemo(() => {
+    const current = theme();
+    return current ? props.store.quotesForTheme(current.id) : [];
+  });
+
+  const jumpToSegment = (target: Segment) => {
+    if (target.transcriptId !== props.store.state.activeTranscriptId) props.store.selectTranscript(target.transcriptId);
+    props.store.selectSegment(target.id);
+    window.setTimeout(() => document.querySelector('.segment-card.active')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+  };
 
   createEffect(() => {
     const current = theme();
@@ -82,11 +92,25 @@ export default function Inspector(props: { store: Store }) {
             <Show when={current().examples.length} fallback={<div class="muted">暂无示例</div>}>
               <ul class="example-list"><For each={current().examples}>{(item) => <li>{item}</li>}</For></ul>
             </Show>
+            <div class="citation-heading">原文引文 <span>{themeQuotes().length} 条</span></div>
+            <Show when={themeQuotes().length} fallback={<div class="muted">在左侧片段里选中文字，即可把原文引文挂到当前主题。</div>}>
+              <div class="quote-list">
+                <For each={themeQuotes()}>{({ quote, segment: source }) => (
+                  <div class="quote-item">
+                    <button class="quote-jump" title="回到来源片段" onClick={() => jumpToSegment(source)}>
+                      <span>{source.time} · {source.speaker}</span>
+                      <p>“{quote.text}”</p>
+                    </button>
+                    <button class="icon-text quote-remove" title="移除这条引文" onClick={() => props.store.removeQuote(quote.id)}>×</button>
+                  </div>
+                )}</For>
+              </div>
+            </Show>
             <Show when={citations().length}>
               <div class="citation-heading">回原文引用 <span>{citations().length} 条</span></div>
               <div class="citation-list">
                 <For each={citations()}>{(item) => (
-                  <button class="citation-link" onClick={() => { props.store.selectSegment(item.id); window.setTimeout(() => document.querySelector('.segment-card.active')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0); }}>
+                  <button class="citation-link" onClick={() => jumpToSegment(item)}>
                     <span>{item.time} · {item.speaker}</span>
                     <p>{item.text}</p>
                   </button>

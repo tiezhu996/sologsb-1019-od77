@@ -179,3 +179,15 @@ kbd { justify-self: start; padding: 3px 7px; border: 1px solid #ccd4cf; border-b
 .citation-link:hover { border-color: #9dbbb3; background: #f0f6f2; }
 .citation-link span { color: #788983; font-size: 9px; }
 .citation-link p { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.quote-pop { position: fixed; z-index: 1200; transform: translate(-50%, calc(-100% - 8px)); }
+.quote-pop button { border: 0; border-radius: 100px; padding: 7px 14px; color: #fff; background: var(--forest); box-shadow: 0 10px 26px rgba(20, 50, 44, .35); font-size: 11px; white-space: nowrap; }
+.quote-pop button:hover:not(:disabled) { background: var(--forest-dark); }
+.quote-pop button:disabled { background: #8a9791; opacity: 1; }
+.quote-flag { color: #7a6a3f; background: #f4ead3; border-radius: 100px; padding: 2px 7px; }
+.quote-list { max-height: 190px; overflow-y: auto; margin-top: 7px; }
+.quote-item { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 5px; }
+.quote-jump { flex: 1; min-width: 0; padding: 8px; text-align: left; border: 1px solid #e3dcc9; border-left: 3px solid #d5b36a; border-radius: 7px; color: inherit; background: #fbf8ef; }
+.quote-jump:hover { border-color: #c9a961; background: #f7f1e1; }
+.quote-jump span { color: #8a7c56; font-size: 9px; }
+.quote-jump p { margin: 4px 0 0; color: #4a3f28; font-family: "Songti SC", serif; font-size: 11px; line-height: 1.55; }
+.quote-remove { flex: 0 0 auto; margin-top: 2px; }
